@@ -9,62 +9,8 @@ local TeleportService = game:GetService("TeleportService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 local Workspace = game:GetService("Workspace")
-local GuiService = game:GetService("GuiService")
 
 local existingGuiName = "NewScriptGui"
-local configFileName = "NewScriptGui_Config.json"
-
-local serverBrowserEnabled, serverAutoRefresh, serverAutoJoin = false, false, false
-local serverFilters, autoJoinFilters = {}, {}
-local serverPreference = "Luck"
-local autoBuyList = {}
-local autoBuyActive = false
-local capturedArgs = {}
-local remoteSpyEnabled = false
-local islandVisitCount = 0
-local islandAutoTeleport = false
-
-local function saveConfig()
-    local cfg = {
-        serverAutoRefresh = serverAutoRefresh,
-        serverAutoJoin = serverAutoJoin,
-        autoJoinFilters = autoJoinFilters,
-        serverPreference = serverPreference,
-        autoBuyActive = autoBuyActive,
-        autoBuyList = autoBuyList,
-        remoteSpyEnabled = remoteSpyEnabled,
-        capturedArgs = capturedArgs,
-        serverFilters = serverFilters,
-        islandAutoTeleport = islandAutoTeleport
-    }
-    pcall(function() writefile(configFileName, HttpService:JSONEncode(cfg)) end)
-end
-
-local function loadConfig()
-    if isfile and isfile(configFileName) then
-        local success, cfg = pcall(function() return HttpService:JSONDecode(readfile(configFileName)) end)
-        if success and type(cfg) == "table" then
-            serverAutoRefresh = cfg.serverAutoRefresh or false
-            serverAutoJoin = cfg.serverAutoJoin or false
-            autoJoinFilters = cfg.autoJoinFilters or {}
-            serverPreference = cfg.serverPreference or "Luck"
-            autoBuyActive = cfg.autoBuyActive or false
-            autoBuyList = cfg.autoBuyList or {}
-            remoteSpyEnabled = cfg.remoteSpyEnabled or false
-            capturedArgs = cfg.capturedArgs or {}
-            serverFilters = cfg.serverFilters or {}
-            islandAutoTeleport = cfg.islandAutoTeleport or false
-        end
-    end
-end
-pcall(loadConfig)
-
-task.spawn(function()
-    while true do
-        pcall(function() GuiService:ClearError() end)
-        task.wait(2)
-    end
-end)
 
 pcall(function()
     for _, container in ipairs({CoreGui, Players.LocalPlayer and Players.LocalPlayer:WaitForChild("PlayerGui")}) do
@@ -112,6 +58,67 @@ end
 task.spawn(persist)
 
 local unloaded = false
+local config = {
+    serverAutoRefresh = false,
+    serverAutoJoin = false,
+    serverPreference = "Luck",
+    autoJoinFilters = {},
+    serverFilters = {},
+    autoBuyList = {},
+    autoBuyActive = false,
+    remoteSpyEnabled = false,
+    uiScale = 1,
+    islandAutoTeleport = false
+}
+
+local function saveConfig()
+    if not writefile then return end
+    pcall(function()
+        writefile(existingGuiName.."_config.json", HttpService:JSONEncode(config))
+    end)
+end
+
+local function loadConfig()
+    if not isfile or not readfile then return end
+    local path = existingGuiName.."_config.json"
+    if isfile(path) then
+        pcall(function()
+            local data = HttpService:JSONDecode(readfile(path))
+            for k,v in pairs(data) do config[k] = v end
+        end)
+    end
+end
+loadConfig()
+
+local function autoCloseErrors()
+    task.spawn(function()
+        while not unloaded do
+            pcall(function()
+                local gui = CoreGui:FindFirstChild("RobloxGui")
+                local prompt = gui and gui:FindFirstChild("ErrorPrompt")
+                if prompt and prompt.Visible then
+                    local button = prompt:FindFirstChild("Button", true)
+                    if button and button:IsA("GuiButton") and button.Visible then
+                        local pos = button.AbsolutePosition + (button.AbsoluteSize / 2)
+                        local input = Instance.new("InputObject")
+                        local gc = getconnections or get_signal_cons
+                        if gc then
+                            for _, signal in ipairs(gc(button.MouseButton1Click) or {}) do
+                                signal:Fire()
+                            end
+                        end
+                        if button:FindFirstChild("TextLabel") and button.TextLabel.Text:find("OK") then
+                            GuiService:ClearError()
+                        end
+                    end
+                end
+            end)
+            task.wait(1)
+        end
+    end)
+end
+autoCloseErrors()
+
 local connections = {}
 local function bind(conn) if conn then table.insert(connections, conn) end return conn end
 local mainGui, overlayGui
@@ -409,7 +416,7 @@ function Components.MultiSelectDropdown(props)
     local padding = New("UIPadding", { Parent = optionsFrame, PaddingLeft = UDim.new(0,6), PaddingTop = UDim.new(0,6), PaddingRight = UDim.new(0,6), PaddingBottom = UDim.new(0,6) })
 
     local open = false
-    local items, selected = {}, {}
+    local items, selected = {}, props.InitialItems or {}
     local colorMap = props.ColorMap or {}
 
     local function desiredMenuHeight()
@@ -493,7 +500,6 @@ function Components.MultiSelectDropdown(props)
 
     local api = {}
     function api.Close() setOpen(false) end
-    function api.SetSelected(sel) if type(sel) == "table" then selected = sel; updateSummary(); rebuildOptions() end end
     function api.SetItems(newItems, preserveSelection)
         local seen = {}
         items, selected = {}, preserveSelection and selected or {}
@@ -526,7 +532,7 @@ function Components.MultiSelectDropdown(props)
     return api, container
 end
 
-local islandAutoTeleport = false
+local islandAutoTeleport = config.islandAutoTeleport
 local islandVisitCount = 0
 local visitedIslands = {}
 local activeIslandInfo = "None"
@@ -644,7 +650,7 @@ local function getStoreItems()
 end
 
 local capturedArgs = {}
-local remoteSpyEnabled = false
+local remoteSpyEnabled = config.remoteSpyEnabled
 
 local function logCapture(rem, args)
     local s = "[REMOTESPY] Captured " .. tostring(rem) .. " | Args: {"
@@ -680,7 +686,6 @@ pcall(function()
                 if tostring(self):lower():find("purchase") or self.Name:lower():find("purchase") then
                     capturedArgs = {...}
                     logCapture(self, capturedArgs)
-                    saveConfig()
                 end
             end
             return old(self, ...)
@@ -700,6 +705,8 @@ pcall(function()
 end)
 
 local lastBuyTime = 0
+local autoBuyList = config.autoBuyList
+local autoBuyActive = config.autoBuyActive
 
 local function tryAutoBuy(matchName, index)
     if tick() - lastBuyTime < 1 then return end
@@ -749,6 +756,9 @@ task.spawn(function()
     end
 end)
 
+local serverBrowserEnabled, serverAutoRefresh, serverAutoJoin = false, config.serverAutoRefresh, config.serverAutoJoin
+local serverFilters, autoJoinFilters = config.serverFilters, config.autoJoinFilters
+local serverPreference = config.serverPreference
 local boostTiers = {
     ["2x Luck"] = {tier = 1, type = "Luck"},
     ["4x Luck"] = {tier = 2, type = "Luck"},
@@ -893,13 +903,13 @@ local function buildGui()
     Components.SetState(islandTpBtn, islandAutoTeleport and "on" or "off", islandAutoTeleport and Theme.Success or Theme.DefaultButton)
     bind(islandTpBtn.MouseButton1Click:Connect(function()
         islandAutoTeleport = not islandAutoTeleport
-        Components.SetState(islandTpBtn, islandAutoTeleport and "on" or "off", islandAutoTeleport and Theme.Success or Theme.DefaultButton)
+        config.islandAutoTeleport = islandAutoTeleport
         saveConfig()
+        Components.SetState(islandTpBtn, islandAutoTeleport and "on" or "off", islandAutoTeleport and Theme.Success or Theme.DefaultButton)
     end))
     local rowF = New("Frame", { Size = UDim2.new(1, -24, 0, 30), Position = UDim2.new(0, 12, 0, 92), BackgroundTransparency = 1, Parent = mainCard, ZIndex = 60 })
     local hopItems = {"Any Boost", "2x Luck", "4x Luck", "8x Luck", "+1 Roll", "+2 Roll", "+3 Roll"}
-    local mainFil = Components.MultiSelectDropdown({ Parent = rowF, Size = UDim2.new(0, 220, 0, 30), Title = "Server Filter", Items = hopItems, ZIndex = 60, OnChanged = function(sel) serverFilters = sel; saveConfig() end })
-    mainFil.SetSelected(serverFilters)
+    Components.MultiSelectDropdown({ Parent = rowF, Size = UDim2.new(0, 220, 0, 30), Title = "Server Filter", Items = hopItems, ZIndex = 60, InitialItems = config.serverFilters, OnChanged = function(sel) config.serverFilters = sel; saveConfig() end })
     local row2 = New("Frame", { Size = UDim2.new(1, -24, 0, 36), Position = UDim2.new(0, 12, 0, 132), BackgroundTransparency = 1, Parent = mainCard, ZIndex = 2 })
     New("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0,8), VerticalAlignment = Enum.VerticalAlignment.Center, Parent = row2 })
     New("TextLabel", { Size = UDim2.new(0, 160, 1, 0), BackgroundTransparency = 1, Text = "Server Hop (Filtered)", TextColor3 = Theme.Text, Font = Enum.Font.GothamBold, TextSize = 16, TextXAlignment = Enum.TextXAlignment.Left, Parent = row2 })
@@ -928,60 +938,57 @@ local function buildGui()
     New("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0,8), Parent = sCtrl })
     New("TextLabel", { Size = UDim2.new(0, 100, 1, 0), BackgroundTransparency = 1, Text = "Auto Refresh", TextColor3 = Theme.Text, Font = Enum.Font.GothamBold, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left, Parent = sCtrl })
     local refBtn = Components.PillButton({ Parent = sCtrl, Size = UDim2.new(0, 28, 0, 28) })
+    Components.SetState(refBtn, serverAutoRefresh and "on" or "off", serverAutoRefresh and Theme.Success or Theme.DefaultButton)
     New("TextLabel", { Size = UDim2.new(0, 70, 1, 0), BackgroundTransparency = 1, Text = "Auto Join", TextColor3 = Theme.Text, Font = Enum.Font.GothamBold, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left, Parent = sCtrl })
     local sJoinBtn = Components.PillButton({ Parent = sCtrl, Size = UDim2.new(0, 28, 0, 28) })
+    Components.SetState(sJoinBtn, serverAutoJoin and "on" or "off", serverAutoJoin and Theme.Success or Theme.DefaultButton)
     local fCtrl = New("Frame", { Size = UDim2.new(1, -24, 0, 30), Position = UDim2.new(0, 12, 0, 92), BackgroundTransparency = 1, Parent = serversCard, ZIndex = 50 })
-    local ajFil = Components.MultiSelectDropdown({ Parent = fCtrl, Size = UDim2.new(0, 220, 0, 30), Title = "Auto Join Filter", Items = hopItems, ZIndex = 60, OnChanged = function(sel) autoJoinFilters = sel; saveConfig() end })
-    ajFil.SetSelected(autoJoinFilters)
+    Components.MultiSelectDropdown({ Parent = fCtrl, Size = UDim2.new(0, 220, 0, 30), Title = "Auto Join Filter", Items = hopItems, ZIndex = 60, InitialItems = config.autoJoinFilters, OnChanged = function(sel) config.autoJoinFilters = sel; saveConfig() end })
     local sList = New("ScrollingFrame", { Size = UDim2.new(1, -24, 1, -125), Position = UDim2.new(0, 12, 0, 125), BackgroundTransparency = 1, Parent = serversCard, ZIndex = 2, CanvasSize = UDim2.new(0,0,0,0), AutomaticCanvasSize = Enum.AutomaticSize.Y })
     New("UIListLayout", { FillDirection = Enum.FillDirection.Vertical, Padding = UDim.new(0, 4), Parent = sList })
-    local refBtn = Components.PillButton({ Parent = sCtrl, Size = UDim2.new(0, 28, 0, 28) })
-    local function startRefresh()
-        task.spawn(function()
-            while serverAutoRefresh and not unloaded do
-                triggerRefresh(); task.wait(2.6); local srvs = readServerList(); populateServerList(sList)
-                if serverAutoJoin then
-                    local curInf = getBoostInfo(getCurrentBoost(srvs))
-                    for _, s in ipairs(srvs) do
-                        if s.id ~= tostring(game.JobId) then
-                            local c = tonumber((s.count:match("(%d+)") or "21"))
-                            if c and c <= 19 then
-                                local comb = (s.boost .. " " .. s.location):lower()
-                                local matches = false
-                                for k, v in pairs(autoJoinFilters) do if v and (k=="Any Boost" and #comb>3 or comb:find(k:lower())) then matches = true; break end end
-                                if matches then
-                                    local nInf = getBoostInfo(s.boost)
-                                    local should = false
-                                    if nInf.tier > curInf.tier then should = true
-                                    elseif nInf.tier == curInf.tier and nInf.tier > 0 then
-                                        if serverPreference == "Luck" and nInf.type == "Luck" and curInf.type ~= "Luck" then should = true
-                                        elseif serverPreference == "Rolls" and nInf.type == "Roll" and curInf.type ~= "Roll" then should = true
+    bind(refBtn.MouseButton1Click:Connect(function()
+        serverAutoRefresh = not serverAutoRefresh
+        config.serverAutoRefresh = serverAutoRefresh
+        saveConfig()
+        Components.SetState(refBtn, serverAutoRefresh and "on" or "off", serverAutoRefresh and Theme.Success or Theme.DefaultButton)
+        if serverAutoRefresh then
+            task.spawn(function()
+                while serverAutoRefresh and not unloaded do
+                    triggerRefresh(); task.wait(2.6); local srvs = readServerList(); populateServerList(sList)
+                    if serverAutoJoin then
+                        local curInf = getBoostInfo(getCurrentBoost(srvs))
+                        for _, s in ipairs(srvs) do
+                            if s.id ~= tostring(game.JobId) then
+                                local c = tonumber((s.count:match("(%d+)") or "21"))
+                                if c and c <= 19 then
+                                    local comb = (s.boost .. " " .. s.location):lower()
+                                    local matches = false
+                                    for k, v in pairs(autoJoinFilters) do if v and (k=="Any Boost" and #comb>3 or comb:find(k:lower())) then matches = true; break end end
+                                    if matches then
+                                        local nInf = getBoostInfo(s.boost)
+                                        local should = false
+                                        if nInf.tier > curInf.tier then should = true
+                                        elseif nInf.tier == curInf.tier and nInf.tier > 0 then
+                                            if serverPreference == "Luck" and nInf.type == "Luck" and curInf.type ~= "Luck" then should = true
+                                            elseif serverPreference == "Rolls" and nInf.type == "Roll" and curInf.type ~= "Roll" then should = true
+                                            end
                                         end
+                                        if should then TeleportService:TeleportToPlaceInstance(game.PlaceId, s.id, Players.LocalPlayer); break end
                                     end
-                                    if should then TeleportService:TeleportToPlaceInstance(game.PlaceId, s.id, Players.LocalPlayer); break end
                                 end
                             end
                         end
                     end
                 end
-            end
-        end)
-    end
-    bind(refBtn.MouseButton1Click:Connect(function()
-        serverAutoRefresh = not serverAutoRefresh
-        Components.SetState(refBtn, serverAutoRefresh and "on" or "off", serverAutoRefresh and Theme.Success or Theme.DefaultButton)
-        saveConfig()
-        if serverAutoRefresh then startRefresh() end
+            end)
+        end
     end))
-    Components.SetState(refBtn, serverAutoRefresh and "on" or "off", serverAutoRefresh and Theme.Success or Theme.DefaultButton)
-    if serverAutoRefresh then startRefresh() end
-
     bind(sJoinBtn.MouseButton1Click:Connect(function()
         serverAutoJoin = not serverAutoJoin
-        Components.SetState(sJoinBtn, serverAutoJoin and "on" or "off", serverAutoJoin and Theme.Success or Theme.DefaultButton)
+        config.serverAutoJoin = serverAutoJoin
         saveConfig()
+        Components.SetState(sJoinBtn, serverAutoJoin and "on" or "off", serverAutoJoin and Theme.Success or Theme.DefaultButton)
     end))
-    Components.SetState(sJoinBtn, serverAutoJoin and "on" or "off", serverAutoJoin and Theme.Success or Theme.DefaultButton)
 
     local pCtrl = New("Frame", { Size = UDim2.new(1, -24, 0, 30), Position = UDim2.new(0, 12, 0, 125), BackgroundTransparency = 1, Parent = serversCard, ZIndex = 2 })
     New("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0,8), Parent = pCtrl })
@@ -992,8 +999,8 @@ local function buildGui()
         Components.SetState(lBtn, serverPreference == "Luck" and "on" or "off", serverPreference == "Luck" and Theme.Success or Theme.DefaultButton)
         Components.SetState(rBtn, serverPreference == "Rolls" and "on" or "off", serverPreference == "Rolls" and Theme.Success or Theme.DefaultButton)
     end
-    bind(lBtn.MouseButton1Click:Connect(function() serverPreference = "Luck"; upPref(); saveConfig() end))
-    bind(rBtn.MouseButton1Click:Connect(function() serverPreference = "Rolls"; upPref(); saveConfig() end))
+    bind(lBtn.MouseButton1Click:Connect(function() serverPreference = "Luck"; config.serverPreference = "Luck"; saveConfig(); upPref() end))
+    bind(rBtn.MouseButton1Click:Connect(function() serverPreference = "Rolls"; config.serverPreference = "Rolls"; saveConfig(); upPref() end))
     upPref()
 
     local sListContainer = sList 
@@ -1016,14 +1023,13 @@ local function buildGui()
     New("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0,8), VerticalAlignment = Enum.VerticalAlignment.Center, Parent = autoRow })
     New("TextLabel", { Parent = autoRow, Size = UDim2.new(0, 70, 1, 0), Text = "Auto Buy", Font = Enum.Font.GothamBold, TextSize = 14, TextColor3 = Theme.Text, BackgroundTransparency = 1, ZIndex = 5 })
     local abToggle = Components.PillButton({ Parent = autoRow, Size = UDim2.new(0, 28, 0, 28), ZIndex = 5 })
-    Components.SetState(abToggle, autoBuyActive and "on" or "off", autoBuyActive and Theme.Success or Theme.DefaultButton)
     bind(abToggle.MouseButton1Click:Connect(function()
         autoBuyActive = not autoBuyActive
-        Components.SetState(abToggle, autoBuyActive and "on" or "off", autoBuyActive and Theme.Success or Theme.DefaultButton)
+        config.autoBuyActive = autoBuyActive
         saveConfig()
+        Components.SetState(abToggle, autoBuyActive and "on" or "off", autoBuyActive and Theme.Success or Theme.DefaultButton)
     end))
-    local okFil = Components.MultiSelectDropdown({ Parent = autoRow, Size = UDim2.new(0, 220, 0, 30), Title = "Target Items", Items = {"double Luck", "triple Luck", "+1 Roll"}, ZIndex = 60, OnChanged = function(sel) autoBuyList = sel; saveConfig() end })
-    okFil.SetSelected(autoBuyList)
+    Components.MultiSelectDropdown({ Parent = autoRow, Size = UDim2.new(0, 220, 0, 30), Title = "Target Items", Items = {"double Luck", "triple Luck", "+1 Roll"}, ZIndex = 60, InitialItems = config.autoBuyList, OnChanged = function(sel) config.autoBuyList = sel; saveConfig() end })
 
     local okScroll = New("ScrollingFrame", { Size = UDim2.new(1, -24, 1, -125), Position = UDim2.new(0, 12, 0, 125), BackgroundTransparency = 1, Parent = okCard, ZIndex = 2, CanvasSize = UDim2.new(0,0,0,0), AutomaticCanvasSize = Enum.AutomaticSize.Y })
     New("UIListLayout", { FillDirection = Enum.FillDirection.Vertical, Padding = UDim.new(0, 4), Parent = okScroll })
@@ -1058,21 +1064,23 @@ local function buildGui()
     New("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0,8), VerticalAlignment = Enum.VerticalAlignment.Center, Parent = spyRow })
     New("TextLabel", { Size = UDim2.new(0, 160, 1, 0), BackgroundTransparency = 1, Text = "Remote Spy (Capture)", TextColor3 = Theme.Text, Font = Enum.Font.GothamBold, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left, Parent = spyRow })
     local spyBtn = Components.PillButton({ Parent = spyRow, Size = UDim2.new(0, 28, 0, 28) })
-    Components.SetState(spyBtn, remoteSpyEnabled and "on" or "off", remoteSpyEnabled and Theme.Success or Theme.DefaultButton)
     bind(spyBtn.MouseButton1Click:Connect(function()
         remoteSpyEnabled = not remoteSpyEnabled
-        Components.SetState(spyBtn, remoteSpyEnabled and "on" or "off", remoteSpyEnabled and Theme.Success or Theme.DefaultButton)
+        config.remoteSpyEnabled = remoteSpyEnabled
         saveConfig()
+        Components.SetState(spyBtn, remoteSpyEnabled and "on" or "off", remoteSpyEnabled and Theme.Success or Theme.DefaultButton)
     end))
+    Components.SetState(spyBtn, remoteSpyEnabled and "on" or "off", remoteSpyEnabled and Theme.Success or Theme.DefaultButton)
     Components.SectionLabel("UI Scale", setCard, 90)
     local slF = New("Frame", { Size = UDim2.new(1, -24, 0, 64), Position = UDim2.new(0, 12, 0, 120), BackgroundColor3 = Color3.fromRGB(20,20,20), Parent = setCard, ZIndex = 2 }, { New("UICorner", { CornerRadius = UDim.new(0,10) }), New("UIStroke", { Color = Theme.Stroke, Thickness = 1 }) })
     local bar = New("Frame", { Size = UDim2.new(1, -24, 0, 8), Position = UDim2.new(0, 12, 0.5, -4), BackgroundColor3 = Color3.fromRGB(40,40,40), Parent = slF, ZIndex = 3, Active = true }, { New("UICorner", { CornerRadius = UDim.new(1, 0) }) })
     local fill = New("Frame", { Size = UDim2.new(0.5, 0, 1, 0), BackgroundColor3 = Theme.AccentA:lerp(Theme.AccentB,0.5), Parent = bar, ZIndex = 4 }, { New("UICorner", { CornerRadius = UDim.new(1, 0) }) })
     local knob = New("Frame", { Size = UDim2.new(0, 14, 0, 14), Position = UDim2.new(0.5, -7, 0.5, -7), BackgroundColor3 = Color3.fromRGB(240,240,240), Parent = bar, ZIndex = 5, Active = true }, { New("UICorner", { CornerRadius = UDim.new(1, 0) }), New("UIStroke", { Color = Theme.Stroke, Thickness = 1 }) })
-    local valT = New("TextLabel", { Size = UDim2.new(1, -24, 0, 18), Position = UDim2.new(0, 12, 1, -24), BackgroundTransparency = 1, TextColor3 = Theme.Muted, Font = Enum.Font.Gotham, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Right, Text = "100%", Parent = slF, ZIndex = 3 })
-    local sc = New("UIScale", { Scale = 1, Parent = frame })
+    local valT = New("TextLabel", { Size = UDim2.new(1, -24, 0, 18), Position = UDim2.new(0, 12, 1, -24), BackgroundTransparency = 1, TextColor3 = Theme.Muted, Font = Enum.Font.Gotham, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Right, Text = math.floor(config.uiScale*100).."%", Parent = slF, ZIndex = 3 })
+    local sc = New("UIScale", { Scale = config.uiScale, Parent = frame })
     local dSl = false
-    local function setA(a) a = math.clamp(a, 0, 1); fill.Size = UDim2.new(a, 0, 1, 0); knob.Position = UDim2.new(a, -7, 0.5, -7); sc.Scale = 0.5 + a*1.5; valT.Text = string.format("%d%%", math.floor(sc.Scale*100 + 0.5)) end
+    local function setA(a) a = math.clamp(a, 0, 1); fill.Size = UDim2.new(a, 0, 1, 0); knob.Position = UDim2.new(a, -7, 0.5, -7); sc.Scale = 0.5 + a*1.5; config.uiScale = sc.Scale; saveConfig(); valT.Text = string.format("%d%%", math.floor(sc.Scale*100 + 0.5)) end
+    setA((config.uiScale - 0.5) / 1.5)
     bind(bar.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then dSl = true; setA((i.Position.X - bar.AbsolutePosition.X)/bar.AbsoluteSize.X) end end))
     bind(UserInputService.InputChanged:Connect(function(i) if dSl and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then setA((i.Position.X - bar.AbsolutePosition.X)/bar.AbsoluteSize.X) end end))
     bind(UserInputService.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then dSl = false end end))
