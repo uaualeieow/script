@@ -51,10 +51,7 @@ task.spawn(antiAFK)
 local function persist()
     local qot = queue_on_teleport or (syn and syn.queue_on_teleport) or (fluxus and fluxus.queue_on_teleport) or queue_teleport
     if qot then
-        local code = getgenv().ScriptLoadString
-        if type(code) ~= "string" then 
-            code = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/uaualeieow/script/refs/heads/main/script"))()' 
-        end
+        local code = getgenv().ScriptLoadString or 'loadstring(game:HttpGet("https://raw.githubusercontent.com/uaualeieow/script/refs/heads/main/script"))()'
         pcall(function() qot(code) end)
         pcall(function()
             Players.LocalPlayer.OnTeleport:Connect(function()
@@ -700,6 +697,41 @@ local function walkTo(pos)
     end
 end
 
+local function getBoostInfo(text)
+    local t = text:lower()
+    local tier = 0
+    if t:find("8x") then tier = 4
+    elseif t:find("4x") then tier = 3
+    elseif t:find("2x") then tier = 2
+    elseif t:find("any") then tier = 1
+    end
+    local type = "None"
+    if t:find("luck") then type = "Luck"
+    elseif t:find("roll") then type = "Roll"
+    end
+    return {tier = tier, type = type}
+end
+
+local function getCurrentBoost(servers)
+    for _, s in ipairs(servers) do
+        if s.id == tostring(game.JobId) then
+            return s.boost
+        end
+    end
+    return "None"
+end
+
+local function tryAutoBuy(name, index)
+    local remote = ReplicatedStorage:FindFirstChild("PurchaseItem", true)
+    if not remote then
+        local re = ReplicatedStorage:FindFirstChild("RemoteEvents")
+        remote = re and re:FindFirstChild("PurchaseItem")
+    end
+    if remote then
+        remote:FireServer(index)
+    end
+end
+
 local isInteracting = false
 local function interactNPC()
     if isInteracting then return end
@@ -798,23 +830,13 @@ pcall(function()
     end
 end)
 
-pcall(function()
-    local re = Instance.new("RemoteEvent")
-    local old; old = hookfunction(re.FireServer, function(self, ...)
-        if not unloaded and config.remoteSpyEnabled and (tostring(self):lower():find("purchase") or self.Name:lower():find("purchase")) then
-            capturedArgs = {...}
-            logCapture(self, capturedArgs)
-        end
-        return old(self, ...)
-    end)
-end)
 
 local lastBuyTime = 0
 local function tryAutoBuy(matchName, index)
-    if tick() - lastBuyTime < 1 then return end
+    if os.clock() - lastBuyTime < 1 then return end
     local remote = ReplicatedStorage:FindFirstChild("PurchaseItem", true) or ReplicatedStorage:FindFirstChild("Purchase", true)
     if not remote or not remote:IsA("RemoteEvent") then return end
-    lastBuyTime = tick()
+    lastBuyTime = os.clock()
     if index and index > 0 then remote:FireServer(index)
     elseif capturedArgs and #capturedArgs > 0 then remote:FireServer(unpack(capturedArgs))
     else remote:FireServer(matchName) end
@@ -826,7 +848,7 @@ task.spawn(function()
         if config.autoBuyActive then
             local island = findIslandModel()
             if island then
-                local t = tick()
+                local t = os.clock()
                 while findIslandModel() and config.autoBuyActive and not unloaded do
                     task.wait(1)
                 end
@@ -1069,9 +1091,9 @@ local function buildGui()
         task.spawn(function()
             local lastRef = 0
             while config.serverAutoRefresh and not unloaded do
-                if tick() - lastRef > 5 then
+                if os.clock() - lastRef > 5 then
                     triggerRefresh()
-                    lastRef = tick()
+                    lastRef = os.clock()
                     task.wait(2.6)
                 end
                 local srvs = readServerList()
