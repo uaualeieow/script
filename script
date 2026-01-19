@@ -28,6 +28,20 @@ pcall(function()
     end
 end)
 
+local function buildGui()
+    local Theme = {
+        Main = Color3.fromRGB(15, 15, 16),
+        Card = Color3.fromRGB(22, 22, 24),
+        AccentA = Color3.fromRGB(255, 60, 140),
+        AccentB = Color3.fromRGB(180, 40, 255),
+        Stroke = Color3.fromRGB(45, 45, 50),
+        Text = Color3.fromRGB(240, 240, 240),
+        Muted = Color3.fromRGB(160, 160, 170),
+        Success = Color3.fromRGB(40, 220, 120),
+        Danger = Color3.fromRGB(255, 80, 80),
+        DefaultButton = Color3.fromRGB(35, 35, 38)
+    }
+
 local antiAFKConn
 local function antiAFK()
     local lp = Players.LocalPlayer
