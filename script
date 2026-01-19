@@ -9,6 +9,7 @@ local TeleportService = game:GetService("TeleportService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 local Workspace = game:GetService("Workspace")
+local PathfindingService = game:GetService("PathfindingService")
 
 repeat task.wait() until Players.LocalPlayer
 local existingGuiName = "NewScriptGui"
@@ -26,6 +27,7 @@ pcall(function()
     end
 end)
 
+local antiAFKConn
 local function antiAFK()
     local gc = getconnections or get_signal_cons
     if gc and Players.LocalPlayer then
@@ -37,7 +39,7 @@ local function antiAFK()
             end
         end)
     elseif Players.LocalPlayer then
-        Players.LocalPlayer.Idled:Connect(function()
+        antiAFKConn = Players.LocalPlayer.Idled:Connect(function()
             local vu = game:GetService("VirtualUser")
             vu:CaptureController()
             vu:ClickButton2(Vector2.new())
@@ -50,7 +52,9 @@ local function persist()
     local qot = queue_on_teleport or (syn and syn.queue_on_teleport) or (fluxus and fluxus.queue_on_teleport) or queue_teleport
     if qot then
         local code = getgenv().ScriptLoadString
-        if type(code) ~= "string" then code = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/uaualeieow/script/refs/heads/main/script"))()' end
+        if type(code) ~= "string" then 
+            code = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/uaualeieow/script/refs/heads/main/script"))()' 
+        end
         pcall(function() qot(code) end)
         pcall(function()
             Players.LocalPlayer.OnTeleport:Connect(function()
@@ -60,6 +64,8 @@ local function persist()
     end
 end
 task.spawn(persist)
+
+
 
 local unloaded = false
 local config = {
@@ -72,7 +78,8 @@ local config = {
     autoBuyActive = false,
     remoteSpyEnabled = false,
     uiScale = 1,
-    islandAutoTeleport = false
+    islandAutoTeleport = false,
+    shopWaypoint = nil
 }
 
 local function saveConfig()
@@ -98,26 +105,27 @@ local function autoCloseErrors()
     task.spawn(function()
         while not unloaded do
             pcall(function()
-                local gui = CoreGui:FindFirstChild("RobloxGui")
-                local prompt = gui and gui:FindFirstChild("ErrorPrompt")
-                if prompt and prompt.Visible then
-                    local button = prompt:FindFirstChild("Button", true)
-                    if button and button:IsA("GuiButton") and button.Visible then
-                        local pos = button.AbsolutePosition + (button.AbsoluteSize / 2)
-                        local input = Instance.new("InputObject")
-                        local gc = getconnections or get_signal_cons
-                        if gc then
-                            for _, signal in ipairs(gc(button.MouseButton1Click) or {}) do
-                                signal:Fire()
+                local sc = {CoreGui:FindFirstChild("RobloxGui"), CoreGui:FindFirstChild("RobloxPromptGui")}
+                for _, gui in ipairs(sc) do
+                    if gui then
+                        local found = false
+                        local err = gui:FindFirstChild("ErrorPrompt", true) or gui:FindFirstChild("PromptHolder", true)
+                        if err and err.Visible then found = true end
+                        if not found then
+                            for _, v in ipairs(gui:GetDescendants()) do
+                                if v:IsA("TextLabel") and (v.Text:lower():find("teleport") or v.Text:lower():find("error") or v.Text:lower():find("timed out")) then
+                                    found = true break
+                                end
                             end
                         end
-                        if button:FindFirstChild("TextLabel") and button.TextLabel.Text:find("OK") then
+                        if found then
                             GuiService:ClearError()
+                            if err then err.Visible = false end
                         end
                     end
                 end
             end)
-            task.wait(1)
+            task.wait(1.5)
         end
     end)
 end
@@ -143,6 +151,7 @@ end
 local function unload()
     if unloaded then return end
     unloaded = true
+    pcall(function() if antiAFKConn then antiAFKConn:Disconnect() end end)
     pcall(function() if mainGui and mainGui.Destroy then mainGui:Destroy() end end)
     pcall(function() if overlayGui and overlayGui.Destroy then overlayGui:Destroy() end end)
     disconnectAll()
@@ -562,13 +571,21 @@ local function findDescendant(parent, name)
     return nil
 end
 
+local lastIslandFound = nil
 local function findIslandModel()
+    local names = {"luck island", "roll island", "mythic island", "divine island", "secret island", "admin island"}
+    local found = nil
     for _, child in ipairs(Workspace:GetChildren()) do
         if child:IsA("Model") and child:FindFirstChild("Teleport") then
-             return child
+             local n = child.Name:lower()
+             for _, name in ipairs(names) do
+                 if n:find(name) then found = child break end
+             end
         end
+        if found then break end
     end
-    return nil
+    lastIslandFound = found
+    return found
 end
 
 local function checkIslandTeleport()
@@ -624,27 +641,90 @@ local function getRareBoardInfo()
     return "Unknown Board Status"
 end
 
-local function openOkMartUI()
-    local pg = Players.LocalPlayer:FindFirstChild("PlayerGui")
-    local store = pg and pg:FindFirstChild("Store")
-    if store then
-        local main = store:FindFirstChild("MainFrame")
-        if main and not (main.Visible or (main:FindFirstChild("Container") and main.Container.Visible)) then
-            local openBtn = nil
-            pcall(function()
-                local hud = pg:FindFirstChild("HUD") or findDescendant(pg, "HUD")
-                openBtn = findDescendant(hud, "StoreButton") or findDescendant(hud, "Store") or findDescendant(hud, "Shop")
-            end)
-            if openBtn then
-                if type(firesignal) == "function" then firesignal(openBtn.MouseButton1Click)
-                elseif openBtn:IsA("GuiButton") then openBtn:Activate() end
-            else
-                main.Visible = true
+local function walkTo(pos)
+    local char = Players.LocalPlayer.Character
+    local hum = char and char:FindFirstChild("Humanoid")
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hum or not hrp then return end
+    
+    local path = PathfindingService:CreatePath({AgentRadius = 2, AgentHeight = 5, AgentCanJump = true, AgentMaxSlope = 50})
+    local success, _ = pcall(function() path:ComputeAsync(hrp.Position, pos) end)
+    
+    if success and path.Status == Enum.PathStatus.Success then
+        local waypoints = path:GetWaypoints()
+        for i, wp in ipairs(waypoints) do
+            if i > 1 then
+                hum:MoveTo(wp.Position)
+                local t = os.clock()
+                local stuckTime = 0
+                
+                while (Vector3.new(hrp.Position.X, 0, hrp.Position.Z) - Vector3.new(wp.Position.X, 0, wp.Position.Z)).Magnitude > 4 do
+                    if not config.autoBuyActive or unloaded then return end
+                    
+                    if (hrp.Velocity * Vector3.new(1,0,1)).Magnitude < 0.2 then
+                        stuckTime = stuckTime + 0.1
+                        if stuckTime > 1.5 then
+                            hum.Jump = true
+                            hum:MoveTo(wp.Position)
+                            stuckTime = 0
+                        end
+                    else
+                        stuckTime = 0
+                    end
+                    
+                    if os.clock() - t > 10 then break end
+                    task.wait(0.1)
+                end
             end
-            task.wait(1.8)
-            main.Visible = false
+        end
+    else
+        hum:MoveTo(pos)
+        local t = os.clock()
+        while (Vector3.new(hrp.Position.X, 0, hrp.Position.Z) - Vector3.new(pos.X, 0, pos.Z)).Magnitude > 4 do
+             if not config.autoBuyActive or unloaded or os.clock() - t > 15 then break end
+             hum:MoveTo(pos)
+             if (hrp.Velocity * Vector3.new(1,0,1)).Magnitude < 0.2 then hum.Jump = true end
+             task.wait(0.1)
         end
     end
+end
+
+local isInteracting = false
+local function interactNPC()
+    if isInteracting then return end
+    isInteracting = true
+    
+    local potentialPath = Workspace:FindFirstChild("NPCs") and Workspace.NPCs:FindFirstChild("Shopkeeper")
+    local npc = potentialPath or Workspace:FindFirstChild("Shopkeeper", true) or findDescendant(Workspace, "Shopkeeper")
+    if not npc then isInteracting = false return end
+    
+    local prompt = findDescendant(npc, "TalkPrompt")
+    local char = Players.LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp or not prompt then isInteracting = false return end
+    
+    local targetHrp = npc:FindFirstChild("HumanoidRootPart") or (npc:IsA("BasePart") and npc) or findDescendant(npc, "HumanoidRootPart")
+    if not targetHrp then isInteracting = false return end
+    
+    local startPos = hrp.Position
+    if config.shopWaypoint then walkTo(Vector3.new(config.shopWaypoint.X, config.shopWaypoint.Y, config.shopWaypoint.Z)) end
+    
+    walkTo(targetHrp.Position)
+    local dist = (Vector3.new(hrp.Position.X, 0, hrp.Position.Z) - Vector3.new(targetHrp.Position.X, 0, targetHrp.Position.Z)).Magnitude
+    
+    if config.autoBuyActive and dist <= 18 then
+        if fireproximityprompt then fireproximityprompt(prompt)
+        else prompt:InputHoldBegin(); task.wait(0.6); prompt:InputHoldEnd() end
+        task.wait(2.5)
+        if config.shopWaypoint then walkTo(Vector3.new(config.shopWaypoint.X, config.shopWaypoint.Y, config.shopWaypoint.Z)) end
+        walkTo(startPos)
+    end
+    
+    isInteracting = false
+end
+
+local function openOkMartUI()
+    interactNPC()
 end
 
 local function getStoreItems()
@@ -652,11 +732,11 @@ local function getStoreItems()
     local pg = Players.LocalPlayer:FindFirstChild("PlayerGui")
     local store = pg and pg:FindFirstChild("Store")
     if not store then return items end
-    local sf = findDescendant(store, "SF")
+    local sf = findDescendant(store, "SF") or findDescendant(store, "ScrollingFrame")
     if sf then
         for _, item in ipairs(sf:GetChildren()) do
-            local title = item:FindFirstChild("TitleLabel")
-            if title and title:IsA("TextLabel") then
+            local title = item:FindFirstChild("TitleLabel") or findDescendant(item, "Title") or findDescendant(item, "Name")
+            if title and (title:IsA("TextLabel") or title:IsA("TextBox")) then
                 local idx = tonumber(item.Name:match("%d+")) or 0
                 table.insert(items, { element = item, name = title.Text, index = idx })
             end
@@ -729,37 +809,57 @@ local function tryAutoBuy(matchName, index)
     else remote:FireServer(matchName) end
 end
 
+local lastWalkTime = 0
 task.spawn(function()
     while not unloaded do
         if config.autoBuyActive then
+            local island = findIslandModel()
+            if island then
+                local t = tick()
+                while findIslandModel() and config.autoBuyActive and not unloaded do
+                    task.wait(1)
+                end
+                if not config.autoBuyActive or unloaded then continue end
+            end
+            
             local items = getStoreItems()
-            if #items == 0 then
-                openOkMartUI()
-                task.wait(1.5)
+            local pg = Players.LocalPlayer:FindFirstChild("PlayerGui")
+            local store = pg and pg:FindFirstChild("Store")
+            local mainFrame = store and store:FindFirstChild("MainFrame")
+            local uiOpen = mainFrame and mainFrame.Visible
+            
+            if not uiOpen or (uiOpen and #items == 0) then
+                if not isInteracting then
+                    openOkMartUI()
+                    task.wait(2)
+                end
                 items = getStoreItems()
             end
-            for _, item in ipairs(items) do
-                local shouldBuy = false
-                for target, enabled in pairs(config.autoBuyList) do
-                    if enabled and item.name:lower():find(target:lower()) then
-                        shouldBuy = true
-                        break
+            if #items > 0 then
+                for _, item in ipairs(items) do
+                    if not config.autoBuyActive then break end
+                    local shouldBuy = false
+                    for target, enabled in pairs(config.autoBuyList) do
+                        if enabled and item.name:lower():find(target:lower()) then
+                            shouldBuy = true
+                            break
+                        end
                     end
-                end
-                if shouldBuy then
-                    local label = item.element:FindFirstChild("TitleLabel")
-                    local txt = label and label.Text or item.name
-                    if not txt:lower():find("sold out") then
-                        local stock = txt:match("%[(%d+)/%d+%]")
-                        if (stock and tonumber(stock) > 0) or (not stock and not txt:lower():find("0/")) then
-                            tryAutoBuy(item.name, item.index)
-                            task.wait(1.1)
+                    if shouldBuy then
+                        local label = item.element:FindFirstChild("TitleLabel")
+                        local txt = label and label.Text or item.name
+                        if not txt:lower():find("sold out") then
+                            local stock = txt:match("%[(%d+)/%d+%]")
+                            if (stock and tonumber(stock) > 0) or (not stock and not txt:lower():find("0/")) then
+                                tryAutoBuy(item.name, item.index)
+                                task.wait(1.5)
+                            end
                         end
                     end
                 end
             end
         end
-        task.wait(3)
+        task.wait(2)
     end
 end)
 
@@ -1094,8 +1194,25 @@ local function buildGui()
         Components.SetState(spyBtn, config.remoteSpyEnabled and "on" or "off", config.remoteSpyEnabled and Theme.Success or Theme.DefaultButton)
     end))
     Components.SetState(spyBtn, config.remoteSpyEnabled and "on" or "off", config.remoteSpyEnabled and Theme.Success or Theme.DefaultButton)
-    Components.SectionLabel("UI Scale", setCard, 90)
-    local slF = New("Frame", { Size = UDim2.new(1, -24, 0, 64), Position = UDim2.new(0, 12, 0, 120), BackgroundColor3 = Color3.fromRGB(20,20,20), Parent = setCard, ZIndex = 2 }, { New("UICorner", { CornerRadius = UDim.new(0,10) }), New("UIStroke", { Color = Theme.Stroke, Thickness = 1 }) })
+    
+    local wpRow = New("Frame", { Size = UDim2.new(1, -24, 0, 36), Position = UDim2.new(0, 12, 0, 115), BackgroundTransparency = 1, Parent = setCard, ZIndex = 2 })
+    New("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0,10), VerticalAlignment = Enum.VerticalAlignment.Center, Parent = wpRow })
+    New("TextLabel", { Size = UDim2.new(0, 160, 1, 0), BackgroundTransparency = 1, Text = "Shop Waypoint", TextColor3 = Theme.Text, Font = Enum.Font.GothamBold, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left, Parent = wpRow })
+    local wpBtn = Components.PillButton({ Parent = wpRow, Size = UDim2.new(0, 100, 0, 28), Text = "Set Here" })
+    bind(wpBtn.MouseButton1Click:Connect(function()
+        local hrp = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            local pos = hrp.Position
+            config.shopWaypoint = {X = pos.X, Y = pos.Y, Z = pos.Z}
+            saveConfig()
+            wpBtn.Text = "Saved!"
+            task.wait(1)
+            wpBtn.Text = "Set Here"
+        end
+    end))
+
+    Components.SectionLabel("UI Scale", setCard, 150)
+    local slF = New("Frame", { Size = UDim2.new(1, -24, 0, 64), Position = UDim2.new(0, 12, 0, 180), BackgroundColor3 = Color3.fromRGB(20,20,20), Parent = setCard, ZIndex = 2 }, { New("UICorner", { CornerRadius = UDim.new(0,10) }), New("UIStroke", { Color = Theme.Stroke, Thickness = 1 }) })
     local bar = New("Frame", { Size = UDim2.new(1, -24, 0, 8), Position = UDim2.new(0, 12, 0.5, -4), BackgroundColor3 = Color3.fromRGB(40,40,40), Parent = slF, ZIndex = 3, Active = true }, { New("UICorner", { CornerRadius = UDim.new(1, 0) }) })
     local fill = New("Frame", { Size = UDim2.new(0.5, 0, 1, 0), BackgroundColor3 = Theme.AccentA:lerp(Theme.AccentB,0.5), Parent = bar, ZIndex = 4 }, { New("UICorner", { CornerRadius = UDim.new(1, 0) }) })
     local knob = New("Frame", { Size = UDim2.new(0, 14, 0, 14), Position = UDim2.new(0.5, -7, 0.5, -7), BackgroundColor3 = Color3.fromRGB(240,240,240), Parent = bar, ZIndex = 5, Active = true }, { New("UICorner", { CornerRadius = UDim.new(1, 0) }), New("UIStroke", { Color = Theme.Stroke, Thickness = 1 }) })
