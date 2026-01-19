@@ -29,21 +29,21 @@ end)
 
 local antiAFKConn
 local function antiAFK()
-    local gc = getconnections or get_signal_cons
-    if gc and Players.LocalPlayer then
-        pcall(function()
-            for _, v in pairs(gc(Players.LocalPlayer.Idled)) do
+    local lp = Players.LocalPlayer
+    if lp then
+        local gc = getconnections or get_signal_cons
+        if gc then
+            for _, v in pairs(gc(lp.Idled)) do
                 if v["Disable"] then v["Disable"](v)
-                elseif v["Disconnect"] then v["Disconnect"](v)
-                end
+                elseif v["Disconnect"] then v["Disconnect"](v) end
             end
-        end)
-    elseif Players.LocalPlayer then
-        antiAFKConn = Players.LocalPlayer.Idled:Connect(function()
-            local vu = game:GetService("VirtualUser")
-            vu:CaptureController()
-            vu:ClickButton2(Vector2.new())
-        end)
+        else
+            lp.Idled:Connect(function()
+                local vu = game:GetService("VirtualUser")
+                vu:CaptureController()
+                vu:ClickButton2(Vector2.new())
+            end)
+        end
     end
 end
 task.spawn(antiAFK)
@@ -103,29 +103,29 @@ loadConfig()
 
 local function autoCloseErrors()
     task.spawn(function()
+        local guiService = game:GetService("GuiService")
         while not unloaded do
             pcall(function()
-                local sc = {CoreGui:FindFirstChild("RobloxGui"), CoreGui:FindFirstChild("RobloxPromptGui")}
-                for _, gui in ipairs(sc) do
+                if guiService then guiService:ClearError() end
+                
+                local targets = {CoreGui:FindFirstChild("RobloxGui"), CoreGui:FindFirstChild("RobloxPromptGui")}
+                for _, gui in ipairs(targets) do
                     if gui then
-                        local found = false
-                        local err = gui:FindFirstChild("ErrorPrompt", true) or gui:FindFirstChild("PromptHolder", true)
-                        if err and err.Visible then found = true end
-                        if not found then
-                            for _, v in ipairs(gui:GetDescendants()) do
-                                if v:IsA("TextLabel") and (v.Text:lower():find("teleport") or v.Text:lower():find("error") or v.Text:lower():find("timed out")) then
-                                    found = true break
-                                end
+                        local prompt = gui:FindFirstChild("promptOverlay")
+                        local err = (prompt and prompt:FindFirstChild("ErrorPrompt")) or gui:FindFirstChild("ErrorPrompt", true)
+                        if err and err.Visible then err.Visible = false end
+                        
+                        for _, v in ipairs(gui:GetDescendants()) do
+                            if v:IsA("TextLabel") and (v.Text:lower():find("teleport failed") or v.Text:lower():find("timed out")) then
+                                local p = v.Parent
+                                if p and p:IsA("Frame") then p.Visible = false end
+                                if p and p.Parent and p.Parent:IsA("Frame") then p.Parent.Visible = false end
                             end
-                        end
-                        if found then
-                            GuiService:ClearError()
-                            if err then err.Visible = false end
                         end
                     end
                 end
             end)
-            task.wait(1.5)
+            task.wait(2)
         end
     end)
 end
@@ -571,18 +571,33 @@ local function findDescendant(parent, name)
     return nil
 end
 
+local function isSpecialIsland(child)
+    if not child or not child:IsA("Model") then return false end
+    local names = {"luck", "roll", "mythic", "divine", "secret", "admin", "mutation"}
+    local n = child.Name:lower()
+    for _, name in ipairs(names) do
+        if n:find(name) then return true end
+    end
+    local info = child:FindFirstChild("IslandInfo")
+    local gui = info and (info:FindFirstChild("IslandGUI") or info:FindFirstChild("IslandGui"))
+    local nameLabel = gui and (gui:FindFirstChild("IslandName") or gui:FindFirstChild("NameLabel"))
+    if nameLabel and nameLabel:IsA("TextLabel") then
+        local txt = nameLabel.Text:lower()
+        for _, name in ipairs(names) do
+            if txt:find(name) then return true end
+        end
+    end
+    return false
+end
+
 local lastIslandFound = nil
 local function findIslandModel()
-    local names = {"luck island", "roll island", "mythic island", "divine island", "secret island", "admin island"}
     local found = nil
     for _, child in ipairs(Workspace:GetChildren()) do
-        if child:IsA("Model") and child:FindFirstChild("Teleport") then
-             local n = child.Name:lower()
-             for _, name in ipairs(names) do
-                 if n:find(name) then found = child break end
-             end
+        if isSpecialIsland(child) then
+            found = child
+            break
         end
-        if found then break end
     end
     lastIslandFound = found
     return found
@@ -610,11 +625,7 @@ task.spawn(function()
 end)
 
 local function getIslandInfo()
-    local luckIsland = Workspace:FindFirstChild("Luck Island") or Workspace:FindFirstChild("Roll Island") or Workspace:FindFirstChild("Mythic Island") or Workspace:FindFirstChild("Divine Island") or Workspace:FindFirstChild("Secret Island") or Workspace:FindFirstChild("Admin Island")
-    if not luckIsland then
-        local anyIsland = findIslandModel()
-        if anyIsland then luckIsland = anyIsland end
-    end
+    local luckIsland = findIslandModel()
     if luckIsland then
         local gui = luckIsland:FindFirstChild("IslandInfo") or luckIsland:FindFirstChild("IslandGui", true)
         if gui then
