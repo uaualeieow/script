@@ -1,5 +1,5 @@
-if getgenv().TPLoaded then getgenv().TPLoaded = nil; task.wait(10) end
-getgenv().ScriptLoadString = 'getgenv().TPLoaded = true; loadstring(game:HttpGet("https://raw.githubusercontent.com/uaualeieow/script/refs/heads/main/script"))()'
+task.wait(10)
+getgenv().ScriptLoadString = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/uaualeieow/script/refs/heads/main/script"))()'
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
@@ -54,7 +54,7 @@ local function persist()
     if qot then
         local code = getgenv().ScriptLoadString
         if type(code) ~= "string" then 
-            code = 'getgenv().TPLoaded = true; loadstring(game:HttpGet("https://raw.githubusercontent.com/uaualeieow/script/refs/heads/main/script"))()' 
+            code = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/uaualeieow/script/refs/heads/main/script"))()' 
         end
         pcall(function() qot(code) end)
         pcall(function()
