@@ -11,21 +11,30 @@ local HttpService = game:GetService("HttpService")
 local Workspace = game:GetService("Workspace")
 local PathfindingService = game:GetService("PathfindingService")
 
+if getgenv()._UnloadPrevious then pcall(getgenv()._UnloadPrevious) end
+if getgenv()._BuildingUI then return end
+getgenv()._BuildingUI = true
+task.delay(10, function() getgenv()._BuildingUI = nil end)
+
 repeat task.wait() until Players.LocalPlayer
 local existingGuiName = "NewScriptGui"
 
-pcall(function()
-    for _, container in ipairs({CoreGui, Players.LocalPlayer and Players.LocalPlayer:WaitForChild("PlayerGui")}) do
-        if container then
-            local old = container:FindFirstChild(existingGuiName)
-            if old then old:Destroy() end
-            local old_overlay = container:FindFirstChild(existingGuiName .. "_Overlay")
-            if old_overlay then old_overlay:Destroy() end
-            local old_blur = Lighting:FindFirstChild(existingGuiName.."_UIBlur")
-            if old_blur then old_blur:Destroy() end
+local function cleanup()
+    pcall(function()
+        for _, container in ipairs({CoreGui, Players.LocalPlayer:FindFirstChild("PlayerGui"), game:GetService("LogService")}) do
+            if container then
+                for _, child in ipairs(container:GetChildren()) do
+                    if child.Name == existingGuiName or child.Name == existingGuiName.."_Overlay" then
+                        child:Destroy()
+                    end
+                end
+            end
         end
-    end
-end)
+        local blur = Lighting:FindFirstChild(existingGuiName.."_UIBlur")
+        if blur then blur:Destroy() end
+    end)
+end
+cleanup()
 
 local antiAFKConn
 local function antiAFK()
@@ -50,14 +59,13 @@ task.spawn(antiAFK)
 
 local function persist()
     local qot = queue_on_teleport or (syn and syn.queue_on_teleport) or (fluxus and fluxus.queue_on_teleport) or queue_teleport
-    if qot then
-        local code = getgenv().ScriptLoadString or 'loadstring(game:HttpGet("https://raw.githubusercontent.com/uaualeieow/script/refs/heads/main/script"))()'
+    if qot and not getgenv()._PersistQueued then
+        local code = getgenv().ScriptLoadString
+        if type(code) ~= "string" then
+            code = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/uaualeieow/script/refs/heads/main/script"))()'
+        end
+        getgenv()._PersistQueued = true
         pcall(function() qot(code) end)
-        pcall(function()
-            Players.LocalPlayer.OnTeleport:Connect(function()
-                pcall(function() qot(code) end)
-            end)
-        end)
     end
 end
 task.spawn(persist)
@@ -159,6 +167,7 @@ local function unload()
     end)
     pcall(function() if script and script.Destroy then script:Destroy() end end)
 end
+getgenv()._UnloadPrevious = unload
 
 local function New(class, props, children)
     local o = Instance.new(class)
@@ -1295,6 +1304,8 @@ local function buildGui()
 end
 
 task.wait(10)
+cleanup()
 local success, err = pcall(buildGui)
 if not success then warn("Build Failed:", err) unload() return end
 ensureOverlay()
+getgenv()._BuildingUI = nil
