@@ -130,6 +130,7 @@ autoCloseErrors()
 
 local connections = {}
 local function bind(conn) if conn then table.insert(connections, conn) end return conn end
+local lastAttemptedId = nil
 local mainGui, overlayGui
 
 local function disconnectAll()
@@ -1100,26 +1101,52 @@ local function buildGui()
                 populateServerList(sList)
                 if config.serverAutoJoin then
                     local curInf = getBoostInfo(getCurrentBoost(srvs))
+                    local currentScore = curInf.tier * 10
+                    if curInf.tier > 0 and curInf.type == config.serverPreference then currentScore = currentScore + 5 end
+                    
+                    local candidates = {}
+                    local maxScore = currentScore
+                    
                     for _, s in ipairs(srvs) do
                         if s.id ~= tostring(game.JobId) then
-                            local c = tonumber((s.count:match("(%d+)") or "21"))
+                            local countMatch = s.count:match("(%d+)")
+                            local c = tonumber(countMatch or "21")
                             if c and c <= 19 then
                                 local comb = (s.boost .. " " .. s.location):lower()
                                 local matches = false
-                                for k, v in pairs(config.autoJoinFilters) do if v and (k=="Any Boost" and #comb>3 or comb:find(k:lower())) then matches = true; break end end
+                                for k, v in pairs(config.autoJoinFilters) do 
+                                    if v and (k == "Any Boost" and #comb > 3 or comb:find(k:lower())) then 
+                                        matches = true 
+                                        break 
+                                    end 
+                                end
+                                
                                 if matches then
                                     local nInf = getBoostInfo(s.boost)
-                                    local should = false
-                                    if nInf.tier > curInf.tier then should = true
-                                    elseif nInf.tier == curInf.tier and nInf.tier > 0 then
-                                        if config.serverPreference == "Luck" and nInf.type == "Luck" and curInf.type ~= "Luck" then should = true
-                                        elseif config.serverPreference == "Rolls" and nInf.type == "Roll" and curInf.type ~= "Roll" then should = true
-                                        end
+                                    local nScore = nInf.tier * 10
+                                    if nInf.tier > 0 and nInf.type == config.serverPreference then nScore = nScore + 5 end
+                                    
+                                    if nScore > maxScore then
+                                        maxScore = nScore
+                                        candidates = {s.id}
+                                    elseif nScore == maxScore and nScore > currentScore then
+                                        table.insert(candidates, s.id)
                                     end
-                                    if should then TeleportService:TeleportToPlaceInstance(game.PlaceId, s.id, Players.LocalPlayer); break end
                                 end
                             end
                         end
+                    end
+                    
+                    if #candidates > 0 then
+                        local targetId = candidates[1]
+                        for i, id in ipairs(candidates) do
+                            if id == lastAttemptedId then
+                                targetId = candidates[(i % #candidates) + 1]
+                                break
+                            end
+                        end
+                        lastAttemptedId = targetId
+                        TeleportService:TeleportToPlaceInstance(game.PlaceId, targetId, Players.LocalPlayer)
                     end
                 end
                 task.wait(5)
