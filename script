@@ -709,17 +709,19 @@ end
 
 local function getBoostInfo(text)
     local t = text:lower()
-    local tier = 0
-    if t:find("8x") then tier = 4
-    elseif t:find("4x") then tier = 3
-    elseif t:find("2x") then tier = 2
-    elseif t:find("any") then tier = 1
+    
+    -- Check for EXACT standard patterns only
+    if t:find("8x") then return {tier = 4, type = "Luck"}
+    elseif t:find("4x") then return {tier = 3, type = "Luck"}
+    elseif t:find("2x") then return {tier = 2, type = "Luck"}
+    elseif t:find("%+1 roll") then return {tier = 1, type = "Roll"}
+    elseif t:find("%+2 roll") then return {tier = 2, type = "Roll"}
+    elseif t:find("%+3 roll") then return {tier = 3, type = "Roll"}
+    elseif t:find("none") or t == "" then return {tier = 0, type = "None"}
+    else
+        -- ANYTHING ELSE = highest priority (gradient/special text)
+        return {tier = 5, type = "Luck"}  -- Tier 5 = above 8x luck
     end
-    local type = "None"
-    if t:find("luck") then type = "Luck"
-    elseif t:find("roll") then type = "Roll"
-    end
-    return {tier = tier, type = type}
 end
 
 local function getCurrentBoost(servers)
@@ -914,12 +916,8 @@ local boostTiers = {
     ["+1 Roll"] = {tier = 1, type = "Roll"},
     ["+2 Roll"] = {tier = 2, type = "Roll"},
     ["+3 Roll"] = {tier = 3, type = "Roll"},
+    -- NEW: Gradient/special luck text will be handled as 8x equivalent
 }
-
-local function getBoostInfo(text)
-    for name, info in pairs(boostTiers) do if text:find(name) then return info end end
-    return {tier = 0, type = "None"}
-end
 
 local function getCurrentBoost(srvs)
     local jid = tostring(game.JobId)
